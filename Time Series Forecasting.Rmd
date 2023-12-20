@@ -1,0 +1,268 @@
+---
+title: "Time Series forecasting of US UNRATE"
+output: html_document
+date: "2023-12-14"
+---
+
+# Introduction
+
+Forecasting and analysis are vital when it comes to comprehending and predicting trends within datasets. They help decision-making processes in a range of industries. For time series data, forecasting models like ARIMA and ETS are powerful tools for forecasting future values based on historical patterns. These models use past observations to provide insights into potential future developments, which can aid proactive planning and resource allocation. The accuracy of forecasts is critical for informed decision-making, and metrics such as Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE) are used to assess model performance. By systematically analyzing time series data, organizations can obtain valuable insights into economic trends, market behaviors, and other critical factors, allowing them to make strategic decisions with a heightened understanding of the future landscape.
+
+```{r}
+#loaading the libraries
+library(stats)
+library(ggplot2)
+library(forecast)
+library(tsibble)
+library(lubridate)
+library(tidyverse)
+library(dplyr)
+library(tidyr)
+```
+
+# Loading Data
+
+```{r}
+ue <- read.csv("Unrate.csv")
+str(ue)
+```
+
+The contain two variables first is a Date string column and second one is the percentage of the US unemployment rate.
+
+# Data Pre-processing
+
+Data pre-processing involves the removal of null values and unnecessary information from the data and also the usage of the pivot_wider method to wide the whole data. But before using the pivot method, it is good to first convert the string Date variable as date column and then convert the whole data in tibble format using tsibble library.
+
+```{r}
+#is.na(ue)
+head(na.omit(ue))
+
+```
+
+## Coverting into tsibble
+
+Before converting into tsibble format first convert the string Date column into Date variable
+
+```{r}
+ue$DATE <- ymd(ue$DATE)
+
+# Display the updated data frame
+print(ue)
+str(ue)
+```
+
+```{r}
+#converting the data into tsibble
+ue$Year <- year(ue$DATE)
+ue_1 <- ue %>%
+  mutate(Month = yearmonth(DATE)) %>%
+  select(-DATE) %>%
+  as_tsibble(index = Month)
+ue_1
+```
+
+Now we can use the original data and omiting the Date from it and by setting the Month variable as index we can wide our data as
+
+```{r}
+ue$Month <- month(ue$DATE, label = TRUE, abbr = FALSE)
+print(head(ue))
+wide_ue <- ue %>%
+  select(-DATE) %>%
+  pivot_wider(
+    names_from = Year,
+    values_from = UNRATE
+  )
+wide_ue
+```
+
+# Data Exploration
+
+## Relevant Plots
+
+Building a Time plot to see the trend of unemployment along the years
+
+```{r}
+#Time plot
+ggplot(ue, aes(x=DATE, y= UNRATE))+
+  geom_line()+
+  labs(title = "Unemployement Rate over the years",
+       x="Years",
+       y="Unemployement Rate")
+```
+
+Now Building the time plot to see the seasonal trend
+
+```{r, fig.width=10}
+ggplot(ue, aes(x=Month, y=UNRATE,group=Year, color=as.factor(Year)))+
+  geom_line()+
+  labs(title = "Unemployement Rate across the season",
+       x ="Season",
+       y="Unemployement Rate",
+       color="Years")
+```
+
+Now building and using some statistical approach to properly understand the data.
+
+Building an ACF and Lag plot help to see the self correlation of variable and correlation as the lag number increases.
+
+```{r}
+# Lag plot
+lag.plot(ue_1$UNRATE, 
+         main = "Lag Plot - Unemployment Rate", 
+         lags = 6)
+```
+
+We can see clearly that lag 1 has strong positive cor-relation but as the lag number increases.The cor-relation gets weaker and data points getting spread.
+
+```{r}
+# ACF plot
+acf(ue_1$UNRATE, main = "ACF Plot - Unemployment Rate", lag.max = 70)
+```
+
+acf plot is another form to check the self correlation as the lag increases the peaks are getting maller showing the correlation is getting weaker.
+
+# Time Series Forecasting
+
+Forecasting is the process of using historical data and current trends to estimate future events. It involves utilizing various methods and techniques to predict future outcomes, such as sales figures, market trends, economic indicators, weather conditions, or any other factors that may be relevant.
+
+The main goal of forecasting is to reduce uncertainty and assist in making informed decisions. Individuals, businesses, and governments use forecasting to plan for the future, allocate resources efficiently, and mitigate potential risks.
+
+In the realm of time series data, forecasting models such as ARIMA (AutoRegressive Integrated Moving Average) and ETS (Exponential Smoothing State Space Models) serve as powerful tools for predicting future values based on historical patterns. By leveraging past observations, these models provide insights into potential future developments, facilitating proactive planning and resource allocation. The accuracy of forecasts is crucial for informed decision-making, and metrics such as Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE) are employed to evaluate model performance.
+
+Before building the models let's divide the data into Training and Test Data
+
+```{r}
+# Convert the tsibble to a time series object
+unemployment_ts <- ts(ue_1$UNRATE, start = c(1948, 1), frequency = 12)
+
+# Define the training and test sets
+train_start <- c(1975, 1)
+train_end <- c(2004, 12)
+test_start <- c(2005, 1)
+test_end <- c(2015, 12)
+
+# Create the training and test data sets
+train_data <- window(unemployment_ts, start = train_start, end = train_end)
+test_data <- window(unemployment_ts, start = test_start, end = test_end)
+```
+
+## ARIMA Model
+
+The ARIMA model is a popular technique for time series forecasting that combines autoregressive (AR) and moving average (MA) components. It involves transforming the original time series to make it stationary by removing trends and seasonality. The AR component captures the relationship between the current value and past values, while the MA component models the relationship between the current value and past forecast errors. The "Integrated" part refers to the differencing process applied to make the series stationary. ARIMA models have three parameters: p (order of the AR component), d (degree of differencing), and q (order of the MA component). By estimating these parameters, ARIMA models can make accurate predictions by considering past values, trends, and error terms in time series data.
+
+auto.arima function is used to build the model using training dataset which is then predicted by using test dataset.
+
+```{r}
+# Fit an ARIMA model to the training data
+arima_model <- auto.arima(train_data)
+
+# Forecast future values
+forecast_values <- forecast(arima_model, h = length(test_data))
+forecast_values
+```
+
+Now Plotting the ARIMA MODEL result to visualize the results effectively
+
+```{r}
+# Plot the results
+plot(forecast_values, main = "Unemployment Rate Forecast")
+lines(test_data, col = "red")
+```
+
+```{r}
+# Calculate accuracy metrics (optional)
+accuracy(forecast_values, test_data)
+```
+
+## Result Interpretition
+
+The following metrics are displayed in a table for a time series forecasting model, such as an ARIMA or ETS model, for both the training and test sets. Here is a brief explanation of the main metrics:
+
+**ME (Mean Error):** Calculates the average difference between predicted and actual values. If the ME is negative in the training set, it means underestimation occurred, while a positive ME in the test set suggests overestimation.
+
+**RMSE (Root Mean Squared Error):** Indicates the square root of the average squared differences between predicted and actual values. This metric provides a comprehensive measure of forecasting accuracy.
+
+**MAE (Mean Absolute Error):** Calculates the average absolute differences between predicted and actual values. It is less affected by outliers compared to the RMSE metric.
+
+**MPE (Mean Percentage Error):** Expresses the average percentage difference between predicted and actual values. If the value is positive, it indicates overestimation, while a negative value suggests underestimation.
+
+**MAPE (Mean Absolute Percentage Error):** Calculates the average absolute percentage difference between predicted and actual values. It is a commonly used metric for percentage-based error.
+
+**MASE (Mean Absolute Scaled Error):** Compares the model's performance to that of a naive forecast, such as using the mean of historical data. A MASE value close to 1 indicates good performance.
+
+**ACF1 (Autocorrelation of Residuals at Lag 1):** Measures the autocorrelation of residuals at Lag 1. Ideally, residuals should not show significant autocorrelation.
+
+**Theil's U:** Compares the forecasted values to those of a naive model. A Theil's U value close to 1 indicates good forecasting accuracy.
+
+## ETS MODEL
+
+ETS, which stands for Exponential Smoothing State Space Models, is a popular time series forecasting method because of its simplicity and effectiveness. ETS models identify patterns in time series data by analyzing three main components: Error (E), Trend (T), and Seasonality (S). The "Exponential Smoothing" part refers to the weighted averaging of past observations, with more recent values given greater importance. The "State Space" formulation allows for a flexible representation of the underlying structure of the time series.
+
+There are three main types of ETS models: ETS(AAA), which includes all three components; ETS(A, A, N), which considers only the error and trend; and ETS(A, N, A), which analyze only the error and seasonality. ETS models are suitable for datasets with different levels of trend and seasonality, making them valuable in various forecasting applications, from economics to finance and beyond. The adaptability and intuitive nature of ETS make it a popular choice for analysts and practitioners in time series forecasting.
+
+Let's Build the model
+
+```{r}
+ets_model <- ets(train_data)
+
+# Forecast future values
+forecast_values <- forecast(ets_model, h = length(test_data))
+forecast_values
+```
+
+Visualizing the Results accordingly
+
+```{r}
+# Plot the results
+plot(forecast_values, main = "Unemployment Rate Forecast (ETS)")
+lines(test_data, col = "red")
+```
+
+```{r}
+# Calculate accuracy metrics (optional)
+accuracy(forecast_values, test_data)
+```
+
+## Interpretition of Accuracy
+
+The metrics provided denote the evaluation of a time series forecasting model, which could be an ARIMA or ETS model, on the training and test sets. The key metrics can be interpreted as follows:
+
+**ME (Mean Error)** is the average difference between predicted and actual values. If ME is negative in the training set, it suggests underestimation, while a positive ME in the test set implies overestimation.
+
+**RMSE (Root Mean Squared Error)** is the square root of the average squared differences between predicted and actual values. It provides an overall measure of forecasting accuracy.
+
+**MAE (Mean Absolute Error)** is the average absolute difference between predicted and actual values. It provides insights into the accuracy of the model without considering the direction of errors.
+
+**MPE (Mean Percentage Error)** is the average percentage difference between predicted and actual values. If the values are positive, it indicates overestimation, while negative values suggest underestimation.
+
+**MAPE (Mean Absolute Percentage Error)** is the average absolute percentage difference between predicted and actual values. It is a commonly used percentage-based error metric.
+
+**MASE (Mean Absolute Scaled Error)** compares the model's performance to that of a naïve forecast, and a value close to 1 indicates good performance.
+
+**ACF1 (Autocorrelation of Residuals at Lag 1)** measures the autocorrelation of residuals at lag 1. Ideally, residuals should not exhibit significant autocorrelation.
+
+**Theil's U** compares the forecasted values to those of a naïve model, and a Theil's U value close to 1 suggests good forecasting accuracy.
+
+# Model Consideration
+
+When it comes to choosing between ARIMA and ETS models for time series data analysis and forecasting, it's important to consider the specific characteristics of the data and what your forecasting goals are.
+
+**ARIMA**
+
+ARIMA models are best suited for capturing linear trends and seasonality in time series data that exhibit consistent underlying patterns that can be well-represented by autoregressive and moving average components. These models are generally robust and perform well in scenarios where the data exhibits a clear structure.
+
+**ETS**
+
+On the other hand, ETS models are more versatile and can handle different levels of trend and seasonality, making them particularly useful when dealing with time series data that may exhibit changing patterns over time. They are adaptive and suitable for scenarios where the data's behavior may evolve, and the level of uncertainty is higher.
+
+Choosing the most appropriate model for your time series data will depend on a range of factors, including the nature of the data, the forecasting goals, and the level of complexity required to achieve the desired outcome.
+
+# Recomendations and Conclusion
+
+When it comes to selecting the best model for analyzing and forecasting time series data, it's essential to consider the individual characteristics of the data and what you want to achieve with the forecast.
+
+ARIMA models are ideal for capturing linear trends and seasonality in time series data that exhibit consistent underlying patterns that can be well-represented by autoregressive and moving average components. These models are generally resilient and perform well in situations where the data displays a clear structure.
+
+On the other hand, ETS models are more adaptable and can handle different levels of trend and seasonality. This makes them particularly useful when dealing with time series data that may exhibit changing patterns over time. They are flexible and suitable for situations where the data's behavior may evolve, and the level of uncertainty is higher.
+
+Choosing the most appropriate model for your time series data will depend on a range of factors, including the nature of the data, the forecasting goals, and the level of complexity required to achieve the desired outcome.
